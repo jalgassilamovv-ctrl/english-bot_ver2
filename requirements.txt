@@ -1,0 +1,14 @@
+python-telegram-bot[job-queue]==21.6
+SpeechRecognition==3.10.4
+pydub==0.25.1
+gTTS==2.5.3
+requests==2.32.3
+python-dotenv==1.0.1
+
+# Python 3.13 удалил несколько старых встроенных модулей (audioop, aifc,
+# chunk), от которых зависят pydub и SpeechRecognition. Эти пакеты — их
+# официальные бэкпорты. На более старых версиях Python эти строки просто
+# не устанавливаются — это нормально.
+audioop-lts; python_version >= "3.13"
+standard-aifc; python_version >= "3.13"
+standard-chunk; python_version >= "3.13"
