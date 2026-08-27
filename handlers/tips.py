@@ -39,4 +39,5 @@ know", чем собирать фразу из отдельных слов за�
 async def cmd_tips(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db.touch_activity(update.effective_chat.id)
     await update.message.reply_text(TIPS_TEXT, parse_mode="HTML")
-    
+
+
