@@ -15,7 +15,6 @@ except ImportError:
 from telegram import Update
 from telegram.ext import (
     Application,
-    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
     MessageHandler,
@@ -30,7 +29,7 @@ from handlers.start import cmd_help, cmd_start
 from handlers.stats import cmd_stats
 from handlers.tips import cmd_tips
 from handlers.voice import cmd_pronounce, handle_voice_message
-from handlers.words import cmd_today, handle_word_voice_callback
+from handlers.words import cmd_today
 from scheduler import register_jobs
 
 logging.basicConfig(
@@ -73,7 +72,6 @@ def main():
     application.add_handler(CommandHandler("stats", cmd_stats))
     application.add_handler(CommandHandler("tips", cmd_tips))
 
-    application.add_handler(CallbackQueryHandler(handle_word_voice_callback, pattern=r"^voice:"))
     application.add_handler(MessageHandler(filters.VOICE, handle_voice_message))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
 
