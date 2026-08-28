@@ -1,7 +1,7 @@
 python-telegram-bot[job-queue]==21.6
 SpeechRecognition==3.10.4
 pydub==0.25.1
-gTTS==2.5.3
+edge-tts==6.1.19
 requests==2.32.3
 python-dotenv==1.0.1
 

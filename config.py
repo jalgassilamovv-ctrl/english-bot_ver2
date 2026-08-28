@@ -52,7 +52,14 @@ PROMPTS_PATH = DATA_DIR / "conversation_prompts.json"
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")  # пусто = бесплатный режим
 
 VOICE_LANG = "en-US"       # язык распознавания речи пользователя
-TTS_LANG = "en"            # язык озвучки ответов бота
+TTS_LANG = "en"            # язык озвучки ответов бота (используется для распознавания)
+
+# Голос озвучки (через edge-tts — бесплатные нейросетевые голоса Microsoft
+# Edge, без ключа и регистрации). По умолчанию — приятный живой женский
+# голос. Другие варианты женских голосов: "en-US-AriaNeural",
+# "en-GB-SoniaNeural", "en-AU-NatashaNeural". Поменять можно через
+# переменную окружения TTS_VOICE в Variables/.env.
+TTS_VOICE = os.environ.get("TTS_VOICE", "en-US-JennyNeural")
 
 # Публичный бесплатный сервер LanguageTool для проверки грамматики.
 # У него есть лимиты по частоте запросов — для одного пользователя достаточно.
