@@ -69,15 +69,25 @@ async def handle_word_voice_callback(update: Update, context: ContextTypes.DEFAU
         await query.answer("Не нашёл это слово 🤔", show_alert=True)
         return
 
-    await query.answer("🎧 Готовлю произношение...")
+        await query.answer("🎧 Готовлю произношение...")
     try:
         speech_text = f"{w['word']}. {w['word']}. {w['example_en']}"
-        audio =  tts.synthesize_to_ogg(speech_text)
-        await context.bot.send_voice(query.message.chat_id, audio)
+        audio = tts.synthesize_to_ogg(speech_text)
+        # Отправляем голосовое как ОТВЕТ на сообщение с этим словом — так
+        # в чате видно, к какому именно слову оно относится, даже если
+        # рассылка успела уйти далеко вниз, и можно тапнуть на цитату,
+        # чтобы вернуться к нужному слову, не листая вручную.
+        await context.bot.send_voice(
+            query.message.chat_id,
+            audio,
+            reply_to_message_id=query.message.message_id,
+        )
     except Exception:
         logger.exception("Не удалось озвучить слово %s", w["word"])
         await context.bot.send_message(
-            query.message.chat_id, "Не получилось озвучить слово, попробуй ещё раз чуть позже."
+            query.message.chat_id,
+            "Не получилось озвучить слово, попробуй ещё раз чуть позже.",
+            reply_to_message_id=query.message.message_id,
         )
 
 
