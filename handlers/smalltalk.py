@@ -94,7 +94,7 @@ async def process_talk_reply(update: Update, context: ContextTypes.DEFAULT_TYPE,
         context.user_data[TALK_ROUND_KEY] = round_num + 1
         await update.message.reply_text(f"{encouragement}\n\n❓ {followup}")
         try:
-            audio = tts.synthesize_to_ogg(followup)
+            audio = await tts.synthesize_to_ogg(followup)
             await update.message.reply_voice(audio)
         except Exception:
             pass
