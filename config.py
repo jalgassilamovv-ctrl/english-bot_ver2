@@ -59,7 +59,7 @@ TTS_LANG = "en"            # язык озвучки ответов бота (и
 # голос. Другие варианты женских голосов: "en-US-AriaNeural",
 # "en-GB-SoniaNeural", "en-AU-NatashaNeural". Поменять можно через
 # переменную окружения TTS_VOICE в Variables/.env.
-TTS_VOICE = os.environ.get("TTS_VOICE", "en-US-JennyNeural") 
+TTS_VOICE = os.environ.get("TTS_VOICE", "Joanna")
 
 # Публичный бесплатный сервер LanguageTool для проверки грамматики.
 # У него есть лимиты по частоте запросов — для одного пользователя достаточно.
