@@ -1,12 +1,16 @@
 """
 Ежедневные слова: подбор, отправка (утренняя рассылка и /today).
 
-Каждое слово отправляется ОТДЕЛЬНЫМ сообщением: картинка-иллюстрация с
-подписью (слово, перевод, определение, пример) и кнопкой "Слушать
-произношение" — голос отправляется только по нажатию на кнопку, а не
-автоматически на каждое слово.
+Каждое слово отправляется ОТДЕЛЬНЫМ сообщением: эмодзи-иллюстрация +
+подпись (слово, перевод, определение, пример) и кнопка "Слушать
+произношение" под ним. Эмодзи выбирается детерминированно по слову (одно
+и то же слово — всегда одно и то же эмодзи), без обращения к сторонним
+сервисам генерации картинок — те оказались слишком медленными и
+ненадёжными на бесплатном хостинге, а эмодзи работает мгновенно и
+никогда не ломается.
 """
 import asyncio
+import hashlib
 import logging
 from datetime import date
 
@@ -15,16 +19,35 @@ from telegram.ext import ContextTypes
 
 import config
 import db
-from utils import image as image_utils
 from utils import tts, wordbank
 
 logger = logging.getLogger(__name__)
 
+GENERAL_EMOJIS = [
+    "💬", "🗣️", "☕", "🏙️", "👋", "🛍️", "📱", "🎉",
+    "🚗", "🏠", "🍽️", "✈️", "💼", "📅", "🤝",
+]
+TECHNICAL_EMOJIS = [
+    "🔧", "⚙️", "🛠️", "🏭", "🔩", "📐", "🧰", "⚡",
+    "🔬", "📊", "🚧", "🦺", "📦", "🧯", "🔌",
+]
+
+
+def _pick_emoji(w: dict) -> str:
+    """Детерминированно выбирает эмодзи-иллюстрацию для слова (по хэшу id),
+    чтобы у одного и того же слова оно всегда было одинаковым, а слова между
+    собой выглядели разнообразно."""
+    pool = TECHNICAL_EMOJIS if w["_source"] == "technical" else GENERAL_EMOJIS
+    idx = int(hashlib.sha256(w["id"].encode("utf-8")).hexdigest(), 16) % len(pool)
+    return pool[idx]
+
 
 def format_word_caption(w: dict) -> str:
-    tag = "🔧" if w["_source"] == "technical" else "💬"
+    emoji = _pick_emoji(w)
+    tag = "🔧 техническое" if w["_source"] == "technical" else "💬 общее"
     return (
-        f"{tag} <b>{w['word']}</b> <i>({w['pos']})</i> — {w['ru']}\n\n"
+        f"{emoji} <b>{w['word']}</b> <i>({w['pos']})</i> — {w['ru']}\n"
+        f"<i>{tag}</i>\n\n"
         f"{w['definition_en']}\n\n"
         f"<i>\"{w['example_en']}\"</i>"
     )
@@ -37,26 +60,13 @@ def _voice_button(word_id: str) -> InlineKeyboardMarkup:
 
 
 async def send_one_word(bot, chat_id: int, w: dict):
-    """Отправляет одно слово: картинка+подпись с кнопкой "Слушать произношение".
-    Голос отправляется не автоматически, а только когда пользователь сам
-    нажмёт на кнопку под нужным словом — так рассылка не превращается в
-    поток голосовых сообщений одно за другим."""
+    """Отправляет одно слово: эмодзи+подпись с кнопкой "Слушать произношение"
+    под НИМ ЖЕ (у каждого слова — своя кнопка). Голос отправляется не
+    автоматически, а только когда пользователь сам нажмёт на кнопку под
+    нужным словом."""
     caption = format_word_caption(w)
-    photo_bytes = None
-    try:
-        photo_bytes = image_utils.generate_word_image(w)
-    except Exception:
-        logger.exception("Ошибка при генерации картинки для %s", w["word"])
-
     markup = _voice_button(w["id"])
-    if photo_bytes:
-        try:
-            await bot.send_photo(chat_id, photo_bytes, caption=caption, parse_mode="HTML", reply_markup=markup)
-        except Exception:
-            logger.exception("Не удалось отправить картинку для %s, шлю текстом", w["word"])
-            await bot.send_message(chat_id, caption, parse_mode="HTML", reply_markup=markup)
-    else:
-        await bot.send_message(chat_id, caption, parse_mode="HTML", reply_markup=markup)
+    await bot.send_message(chat_id, caption, parse_mode="HTML", reply_markup=markup)
 
 
 async def handle_word_voice_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -69,7 +79,7 @@ async def handle_word_voice_callback(update: Update, context: ContextTypes.DEFAU
         await query.answer("Не нашёл это слово 🤔", show_alert=True)
         return
 
-        await query.answer("🎧 Готовлю произношение...")
+    await query.answer("🎧 Готовлю произношение...")
     try:
         speech_text = f"{w['word']}. {w['word']}. {w['example_en']}"
         audio = tts.synthesize_to_ogg(speech_text)
