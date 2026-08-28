@@ -55,7 +55,7 @@ async def cmd_pronounce(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     phrase = " ".join(context.args)
     try:
-        audio = tts.synthesize_to_ogg(phrase)
+        audio = await tts.synthesize_to_ogg(phrase)
         await update.message.reply_voice(audio, caption=f"🔊 {phrase}")
     except Exception:
         logger.exception("Ошибка синтеза речи")
