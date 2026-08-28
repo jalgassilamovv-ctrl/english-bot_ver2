@@ -1,20 +1,24 @@
 """
 Ежедневные слова: подбор, отправка (утренняя рассылка и /today).
 
-Каждое слово отправляется ОТДЕЛЬНЫМ сообщением: эмодзи-иллюстрация +
-подпись (слово, перевод, определение, пример) и кнопка "Слушать
-произношение" под ним. Эмодзи выбирается детерминированно по слову (одно
-и то же слово — всегда одно и то же эмодзи), без обращения к сторонним
-сервисам генерации картинок — те оказались слишком медленными и
-ненадёжными на бесплатном хостинге, а эмодзи работает мгновенно и
-никогда не ломается.
+Каждое слово отправляется ОДНИМ сообщением — голосовым: озвучка слова +
+подпись (эмодзи-иллюстрация, слово, перевод, определение, пример) сразу
+под аудио-плеером. Это удобнее, чем текст + отдельная кнопка + отдельное
+голосовое сообщение где-то внизу чата: всё нужное для одного слова лежит
+в одном сообщении, которое можно проиграть одним тапом.
+
+Эмодзи выбирается по смыслу слова (ключевые слова в самом слове и его
+определении) — "car" даёт 🚗, "bottle" — 🍾 и т.д., а не случайную
+"техническую"/"общую" картинку. Если под слово не нашлось подходящего
+правила, используется детерминированный запасной вариант по хэшу id
+(одно и то же слово — всегда одно и то же эмодзи).
 """
 import asyncio
 import hashlib
 import logging
 from datetime import date
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import Update
 from telegram.ext import ContextTypes
 
 import config
@@ -23,21 +27,117 @@ from utils import tts, wordbank
 
 logger = logging.getLogger(__name__)
 
-GENERAL_EMOJIS = [
-    "💬", "🗣️", "☕", "🏙️", "👋", "🛍️", "📱", "🎉",
-    "🚗", "🏠", "🍽️", "✈️", "💼", "📅", "🤝",
+# Правила подбора эмодзи по ключевым словам: ищем вхождение подстроки в
+# "word + definition_en" (в нижнем регистре). Порядок важен — проверяются
+# сверху вниз, первое совпадение побеждает, поэтому более конкретные
+# правила стоят раньше более общих.
+EMOJI_RULES = [
+    (["car", "vehicle", "traffic jam", "traffic"], "🚗"),
+    (["bottle"], "🍾"),
+    (["phone", "telephone", "call "], "📞"),
+    (["laptop", "computer", "device", "upgrade", "troubleshoot", "software", "app "], "💻"),
+    (["email", "inbox"], "📧"),
+    (["document", "paperwork", "contract", "form ", "receipt", "invoice"], "📄"),
+    (["book", " read "], "📖"),
+    (["coffee", "cafe", "café"], "☕"),
+    (["restaurant", "meal", " food", "lunch", "dinner", "grocery"], "🍽️"),
+    (["apartment", "accommodation", "landlord", "roommate", " rent", "house", "home "], "🏠"),
+    (["hotel"], "🏨"),
+    (["plane", "flight", "airport", "board a", "jet lag"], "✈️"),
+    (["trip", "travel", "destination", "itinerary", "journey", "tour", "vacation", "culture shock"], "🧳"),
+    (["map", "route", "navigate", "corner", "straight ahead", "turn left", "get to"], "🗺️"),
+    (["budget", "expense", "afford", "invest", " cost", " pay ", "price", "salary", "bargain", "money", "financ"], "💰"),
+    (["bank"], "🏦"),
+    (["calendar", "schedule", "agenda", "deadline", "appointment", "punctual"], "📅"),
+    (["clock", " time", "delay"], "⏰"),
+    (["meeting", "conference"], "🧑‍💼"),
+    (["colleague", "collaborate", "coworker", "teamwork", " team", "on the same page"], "🤝"),
+    (["boss", "manager", "supervisor", "stakeholder", "chain of command", "delegate a task"], "🧑‍💼"),
+    (["doctor", "hospital", "medicine", "prescription", "illness", "recover"], "💊"),
+    (["health", "well-being", "well being"], "🩺"),
+    (["family", "childhood", "parent", "upbringing", "neighbor"], "👨‍👩‍👧"),
+    (["weather"], "⛅"),
+    (["shop", "store", "purchase", " buy "], "🛍️"),
+    (["key ", "lock", "door"], "🔑"),
+    (["idea", "consider", "perspective", "opinion", "believe", "point of view", "assume", "clarify", "elaborate", "emphasize", "justify", "make sense", "off the top of my head"], "💡"),
+    (["problem", "issue", "challenge", "difficulty", "struggle", "obstacle", "bottleneck"], "⚠️"),
+    (["solve", "solution", "figure out", "troubleshoot"], "🧩"),
+    (["goal", "achieve", "accomplish", "milestone", "target"], "🎯"),
+    (["progress", "improve", "growth", "development"], "📈"),
+    (["promotion", "career", "advance", "performance review", "get up to speed"], "🚀"),
+    (["grateful", "relieved", "satisfied", "glad", "worthwhile"], "😊"),
+    (["exhaust", "overwhelm", "burnout", "stress"], "😩"),
+    (["angry", "frustrat", "annoy"], "😤"),
+    (["confiden", "determined", "ambitious", "skillful"], "💪"),
+    (["curious", "interested"], "🤔"),
+    (["patient", "calm"], "🧘"),
+    (["safety", "hazard", "risk", "danger", "protective equipment", "ppe"], "⚠️"),
+    (["fire "], "🔥"),
+    (["machine", "equipment", "mechanism", "operate a machine", "hydraulic", "gasket", "bearing", "lubrication", "vibration"], "⚙️"),
+    (["repair", "maintenance", "replace a part", "malfunction", "breakdown"], "🔧"),
+    (["factory", "production", "assembly", "manufactur", "plant "], "🏭"),
+    (["quality", "inspect", "defect", "standard", "non-conformance", "near miss", "sanity check"], "✅"),
+    (["measure", "gauge", "tolerance", "calibrat", "dimension", "specification"], "📏"),
+    (["weld", "fabricat", "machining", "torque", "component"], "🔩"),
+    (["supply chain", "vendor", "procurement", "shipment", "warehouse", "inventory", "logistics", "raw material", "freight", "customs clearance", "backorder"], "📦"),
+    (["incident report", "report"], "📋"),
+    (["data", "analysis", "statistic", "throughput", "yield", "output", "batch", "efficiency", "capacity", "cost-effective"], "📊"),
+    (["environment", "sustainab", "eco"], "🌱"),
+    (["energy", "electric", "power", "voltage"], "⚡"),
+    (["water", "liquid"], "💧"),
+    (["material", "corrosion", "wear and tear"], "🧱"),
+    (["talk", "speak", "discuss", "conversation", "communicat", "put it into words", "put it another way", "tip of my tongue", "mother tongue"], "💬"),
+    (["apologize", "sorry", "amends"], "🙏"),
+    (["agree", "negotiate", "agreement", "sign off"], "🤝"),
+    (["argue", "disagree", "contradict"], "🗣️"),
+    (["blueprint", "technical drawing", "prototype", "schematic", "as-built", "critical path", "change order", "punch list"], "📐"),
+    (["shutdown", "downtime"], "🛑"),
+    (["hobby", "leisure", "recharge", "relax", "binge-watch", "fresh air"], "🎨"),
+    (["chores", "errand", "routine", "habit"], "🗓️"),
+    (["workload", "prioritize", "overtime", "day off", "trial run", "moving forward"], "📋"),
+    (["motivation", "give it a shot", "step out of your comfort zone", "practice makes perfect"], "🔥"),
+    (["community", "diverse", "awareness"], "🌐"),
+    (["balance"], "⚖️"),
+    (["reliable", "trustworthy", "genuine", "supportive"], "🤝"),
+    (["flexible", "adapt", "spontaneous"], "🤸"),
+    (["misunderstanding", "torn between", "change my mind", "make up my mind", "rule of thumb", "make a decision"], "🤔"),
+    (["reliable connection", "automate", "optimize", "streamline", "implement", "rollout", "downstream", "upstream", "regulation", "compliance", "commissioning", "deliverable", "alignment", "load capacity", "control room", "traceability", "backup system", "onboarding"], "⚙️"),
+    (["consistent"], "🔁"),
+    (["get along with", "run into", "hang out", "catch up"], "👋"),
+    (["look forward to"], "🤗"),
+    (["take a break"], "☕"),
+    (["get used to"], "🔁"),
+    (["run out of"], "📉"),
+    (["drop someone off"], "🚗"),
+    (["settle down"], "🏡"),
+    (["picky", "outgoing", "stubborn", "down to earth"], "🙂"),
+    (["seat taken"], "💺"),
+    (["kindly", "at your earliest convenience", "could you", "would you mind"], "🙏"),
+    (["scale of the project", "field engineer", "handover"], "🏗️"),
 ]
-TECHNICAL_EMOJIS = [
-    "🔧", "⚙️", "🛠️", "🏭", "🔩", "📐", "🧰", "⚡",
-    "🔬", "📊", "🚧", "🦺", "📦", "🧯", "🔌",
-]
+
+# Запасной пул — только для тех редких слов, под которые не нашлось ни
+# одного правила выше. Выбор детерминированный (по хэшу id), чтобы у
+# конкретного слова эмодзи не менялось от раза к разу.
+_FALLBACK_GENERAL = ["💬", "🗣️", "🏙️", "👋", "🛍️", "📱", "🎉", "💼", "📅"]
+_FALLBACK_TECHNICAL = ["🔧", "⚙️", "🛠️", "🏭", "🔩", "📐", "🧰", "📊", "🔌"]
 
 
 def _pick_emoji(w: dict) -> str:
-    """Детерминированно выбирает эмодзи-иллюстрацию для слова (по хэшу id),
-    чтобы у одного и того же слова оно всегда было одинаковым, а слова между
-    собой выглядели разнообразно."""
-    pool = TECHNICAL_EMOJIS if w["_source"] == "technical" else GENERAL_EMOJIS
+    """Подбирает эмодзи, конкретно отражающее смысл слова: сперва ищем
+    ключевые слова в самом слове/определении (car → 🚗, bottle → 🍾 и
+    т.д.), и только если ничего не подошло — берём запасной вариант
+    (для фраз по умолчанию 💬, иначе — по хэшу id, детерминированно)."""
+    text = f"{w['word']} {w.get('definition_en', '')}".lower()
+    for keywords, emoji in EMOJI_RULES:
+        for kw in keywords:
+            if kw in text:
+                return emoji
+
+    if w.get("pos") == "phrase":
+        return "💬"
+
+    pool = _FALLBACK_TECHNICAL if w["_source"] == "technical" else _FALLBACK_GENERAL
     idx = int(hashlib.sha256(w["id"].encode("utf-8")).hexdigest(), 16) % len(pool)
     return pool[idx]
 
@@ -53,52 +153,21 @@ def format_word_caption(w: dict) -> str:
     )
 
 
-def _voice_button(word_id: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("🔊 Слушать произношение", callback_data=f"voice:{word_id}")]]
-    )
-
-
 async def send_one_word(bot, chat_id: int, w: dict):
-    """Отправляет одно слово: эмодзи+подпись с кнопкой "Слушать произношение"
-    под НИМ ЖЕ (у каждого слова — своя кнопка). Голос отправляется не
-    автоматически, а только когда пользователь сам нажмёт на кнопку под
-    нужным словом."""
+    """Отправляет одно слово ОДНИМ сообщением: голосовое произношение с
+    подписью (эмодзи + слово + перевод + определение + пример) сразу под
+    ним. Так не нужна отдельная кнопка и не появляется отдельное
+    сообщение с голосом где-то в конце чата — всё в одном месте, тапнул
+    и услышал. Если озвучить не получилось (сбой TTS) — отправляем тем
+    же текстом обычным сообщением, чтобы слово всё равно дошло."""
     caption = format_word_caption(w)
-    markup = _voice_button(w["id"])
-    await bot.send_message(chat_id, caption, parse_mode="HTML", reply_markup=markup)
-
-
-async def handle_word_voice_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Срабатывает по нажатию на кнопку "🔊 Слушать произношение" под словом —
-    озвучивает именно это слово, по требованию, а не автоматически."""
-    query = update.callback_query
-    word_id = query.data.split(":", 1)[1]
-    w = wordbank.get_word_by_id(word_id)
-    if not w:
-        await query.answer("Не нашёл это слово 🤔", show_alert=True)
-        return
-
-    await query.answer("🎧 Готовлю произношение...")
     try:
         speech_text = f"{w['word']}. {w['word']}. {w['example_en']}"
         audio = tts.synthesize_to_ogg(speech_text)
-        # Отправляем голосовое как ОТВЕТ на сообщение с этим словом — так
-        # в чате видно, к какому именно слову оно относится, даже если
-        # рассылка успела уйти далеко вниз, и можно тапнуть на цитату,
-        # чтобы вернуться к нужному слову, не листая вручную.
-        await context.bot.send_voice(
-            query.message.chat_id,
-            audio,
-            reply_to_message_id=query.message.message_id,
-        )
+        await bot.send_voice(chat_id, audio, caption=caption, parse_mode="HTML")
     except Exception:
         logger.exception("Не удалось озвучить слово %s", w["word"])
-        await context.bot.send_message(
-            query.message.chat_id,
-            "Не получилось озвучить слово, попробуй ещё раз чуть позже.",
-            reply_to_message_id=query.message.message_id,
-        )
+        await bot.send_message(chat_id, caption, parse_mode="HTML")
 
 
 async def send_daily_words(bot, chat_id: int, prepend: str = None):
