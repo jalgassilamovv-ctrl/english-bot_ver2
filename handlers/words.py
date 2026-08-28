@@ -72,7 +72,7 @@ async def handle_word_voice_callback(update: Update, context: ContextTypes.DEFAU
     await query.answer("🎧 Готовлю произношение...")
     try:
         speech_text = f"{w['word']}. {w['word']}. {w['example_en']}"
-        audio = await tts.synthesize_to_ogg(speech_text)
+        audio =  tts.synthesize_to_ogg(speech_text)
         await context.bot.send_voice(query.message.chat_id, audio)
     except Exception:
         logger.exception("Не удалось озвучить слово %s", w["word"])
