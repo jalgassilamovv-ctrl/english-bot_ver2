@@ -1,21 +1,10 @@
 """
 Ежедневные слова: подбор, отправка (утренняя рассылка и /today).
 
-Каждое слово отправляется текстом (эмодзи-иллюстрация + перевод +
-определение + пример) с кнопкой "▶️ Слушать произношение" под ним.
-
-ВАЖНО про воспроизведение: у Telegram есть встроенное цепное
-автовоспроизведение подряд идущих "проигрываемых" сообщений — и это
-касается ВСЕХ форматов, которые пробовали (голосовые send_voice,
-аудио-треки send_audio, и даже файлы-документы send_document с .mp3):
-если в чате заранее лежит много таких сообщений подряд, воспроизведение
-одного само перескакивает на следующее. Единственный надёжный способ
-избежать этого — не отправлять озвучку всех слов заранее, а генерировать
-и присылать её только по нажатию кнопки у конкретного слова: тогда в
-моменте в чате не оказывается сразу пачки готовых аудио, которые можно
-сцепить одно за другим. Голос приходит ОТВЕТОМ (reply) на сообщение
-этого слова — так видно, к какому слову он относится, даже если рассылка
-уже ушла далеко вниз.
+Каждое слово отправляется ОДНИМ сообщением: аудио-файл с произношением
+(.mp3, как файл-документ) и подписью (эмодзи-иллюстрация, слово, перевод,
+определение, пример) сразу под ним — тапнул на плеер и услышал, без
+отдельной кнопки и отдельного сообщения где-то ещё в чате.
 
 Эмодзи выбирается по смыслу слова (ключевые слова в самом слове и его
 определении) — "car" даёт 🚗, "bottle" — 🍾 и т.д., а не случайную
@@ -26,9 +15,10 @@
 import asyncio
 import hashlib
 import logging
+import re
 from datetime import date
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import Update
 from telegram.ext import ContextTypes
 
 import config
@@ -152,6 +142,14 @@ def _pick_emoji(w: dict) -> str:
     return pool[idx]
 
 
+def _safe_filename(word: str) -> str:
+    """Превращает слово/фразу в безопасное имя файла для .mp3 (без
+    пробелов и спецсимволов, которые могут не понравиться некоторым
+    клиентам)."""
+    slug = re.sub(r"[^A-Za-z0-9]+", "_", word).strip("_").lower()
+    return f"{slug or 'word'}.mp3"
+
+
 def format_word_caption(w: dict) -> str:
     emoji = _pick_emoji(w)
     tag = "🔧 техническое" if w["_source"] == "technical" else "💬 общее"
@@ -163,51 +161,26 @@ def format_word_caption(w: dict) -> str:
     )
 
 
-def _voice_button(word_id: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("▶️ Слушать произношение", callback_data=f"voice:{word_id}")]]
-    )
-
-
 async def send_one_word(bot, chat_id: int, w: dict):
-    """Отправляет одно слово текстом с кнопкой "▶️ Слушать произношение"
-    под ним. Озвучка НЕ отправляется автоматически — только когда
-    пользователь сам нажмёт кнопку у конкретного слова (см. подробное
-    объяснение почему в шапке файла: это единственный способ гарантированно
-    не дать Telegram сцепить автовоспроизведение всех слов подряд)."""
+    """Отправляет одно слово ОДНИМ сообщением: аудио-файл с произношением
+    (файл-документ, .mp3) и подписью (эмодзи + слово + перевод +
+    определение + пример) сразу под ним. Если озвучить не получилось
+    (сбой TTS) — отправляем тем же текстом обычным сообщением, чтобы
+    слово всё равно дошло."""
     caption = format_word_caption(w)
-    markup = _voice_button(w["id"])
-    await bot.send_message(chat_id, caption, parse_mode="HTML", reply_markup=markup)
-
-
-async def handle_word_voice_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Срабатывает по нажатию на кнопку "▶️ Слушать произношение" под
-    словом — озвучивает именно это слово, по требованию. Голос
-    отправляется ответом (reply) на сообщение этого слова, чтобы было
-    видно, к какому слову он относится."""
-    query = update.callback_query
-    word_id = query.data.split(":", 1)[1]
-    w = wordbank.get_word_by_id(word_id)
-    if not w:
-        await query.answer("Не нашёл это слово 🤔", show_alert=True)
-        return
-
-    await query.answer("🎧 Готовлю произношение...")
     try:
         speech_text = f"{w['word']}. {w['word']}. {w['example_en']}"
-        audio = tts.synthesize_to_ogg(speech_text)
-        await context.bot.send_voice(
-            query.message.chat_id,
-            audio,
-            reply_to_message_id=query.message.message_id,
+        audio = tts.synthesize_to_mp3(speech_text)
+        await bot.send_document(
+            chat_id,
+            document=audio,
+            filename=_safe_filename(w["word"]),
+            caption=caption,
+            parse_mode="HTML",
         )
     except Exception:
         logger.exception("Не удалось озвучить слово %s", w["word"])
-        await context.bot.send_message(
-            query.message.chat_id,
-            "Не получилось озвучить слово, попробуй ещё раз чуть позже.",
-            reply_to_message_id=query.message.message_id,
-        )
+        await bot.send_message(chat_id, caption, parse_mode="HTML")
 
 
 async def send_daily_words(bot, chat_id: int, prepend: str = None):
