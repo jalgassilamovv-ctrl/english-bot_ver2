@@ -12,6 +12,14 @@
 "техническую"/"общую" картинку. Если под слово не нашлось подходящего
 правила, используется детерминированный запасной вариант по хэшу id
 (одно и то же слово — всегда одно и то же эмодзи).
+
+ВАЖНО про порядок сообщений: у Telegram есть встроенная "цепная"
+автовоспроизведение голосовых — если несколько голосовых сообщений идут
+ПОДРЯД без ничего между ними, при нажатии play на первом клиент сам
+включает следующее, потом следующее и т.д. Чтобы этого не происходило и
+каждое слово нужно было включать вручную, между голосовыми сообщениями
+вставляется маленькое текстовое сообщение-разделитель — оно "разрывает"
+эту цепочку на стороне Telegram.
 """
 import asyncio
 import hashlib
@@ -122,6 +130,12 @@ EMOJI_RULES = [
 _FALLBACK_GENERAL = ["💬", "🗣️", "🏙️", "👋", "🛍️", "📱", "🎉", "💼", "📅"]
 _FALLBACK_TECHNICAL = ["🔧", "⚙️", "🛠️", "🏭", "🔩", "📐", "🧰", "📊", "🔌"]
 
+# Разделитель между голосовыми сообщениями слов — короткое текстовое
+# сообщение, которое "разрывает" встроенную в Telegram цепочку
+# автовоспроизведения подряд идущих голосовых (иначе плеер сам включает
+# следующее слово, когда заканчивается предыдущее).
+_SEPARATOR = "▫️"
+
 
 def _pick_emoji(w: dict) -> str:
     """Подбирает эмодзи, конкретно отражающее смысл слова: сперва ищем
@@ -196,6 +210,9 @@ async def send_daily_words(bot, chat_id: int, prepend: str = None):
         await send_one_word(bot, chat_id, w)
         if i < len(words) - 1:
             await asyncio.sleep(config.WORD_SEND_DELAY_SECONDS)
+            # Разделитель между голосовыми — чтобы Telegram не запускал
+            # следующее слово автоматически после предыдущего.
+            await bot.send_message(chat_id, _SEPARATOR)
 
     await bot.send_message(
         chat_id,
@@ -221,3 +238,4 @@ async def cmd_today(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_one_word(context.bot, chat_id, w)
         if i < len(words) - 1:
             await asyncio.sleep(config.WORD_SEND_DELAY_SECONDS)
+            await context.bot.send_message(chat_id, _SEPARATOR)
